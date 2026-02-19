@@ -1,1 +1,18 @@
+# Credentials
 .env
+
+# Database and History
+profiles.db
+sent_history.json
+
+# Media and Screenshots
+scraped_profiles/
+
+# Python environment and cache
+venv/
+__pycache__/
+*.pyc
+
+# IDE Settings
+.vscode/
+.idea/

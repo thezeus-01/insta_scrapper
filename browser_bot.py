@@ -13,73 +13,38 @@ from webdriver_manager.chrome import ChromeDriverManager
 from config import (
     IG_USERNAME, IG_PASSWORD, GEMINI_API_KEY, GROQ_API_KEY, GROQ_MODEL,
     HEADLESS, DRY_RUN, TARGET_HASHTAGS, MY_INTERESTS, MY_INSTA_ID, USE_AI, DEFAULT_MESSAGE,
-    MAX_POSTS_PER_HASHTAG, GENDER_KEYWORDS
+    MAX_POSTS_PER_HASHTAG, GENDER_KEYWORDS, USE_EXISTING_BROWSER, REMOTE_DEBUGGING_PORT,
+    MESSAGE_DELAY_RANGE, ACTION_DELAY_RANGE, MAX_SESSION_MATCHES
 )
 from history_manager import HistoryManager
 from db_manager import DatabaseManager
 from matcher import calculate_similarity
-from groq import Groq
+from ai_engine import AIHandlerEngine
 import re
 
-class AIHandlerEngine:
-    def __init__(self):
-        print("\n" + "="*50)
-        print("MIGRATING AI ENGINE TO GROQ (EXTREME SPEED)")
-        print("="*50 + "\n")
-        try:
-            self.client = Groq(api_key=GROQ_API_KEY)
-            print(f"AI System Initialized: Using Groq ({GROQ_MODEL})")
-        except Exception as e:
-            print(f"CRITICAL: AI Initialization failed: {e}")
-            self.client = None
-
-    def analyze_profile(self, username, bio, posts_content, user_dna="", my_interests=None):
-        interests_str = ", ".join(my_interests) if my_interests else ", ".join(MY_INTERESTS)
-        prompt = f"""
-        Reference Profile: {user_dna}
-        Interests: {interests_str}
-        Target: @{username} | Bio: {bio} | Posts: {posts_content}
-        
-        Task:
-        1. **STRICT GENDER FILTER (CRITICAL):** The target MUST be female. If the profile belongs to a male, you MUST set "match": false.
-        2. **AGE FILTER:** Target range is 19-23. 
-           - If age is 24+, set "match": false.
-           - If age is UNKNOWN or NOT MENTIONED, set "match": true (The user will manually filter these).
-        3. Match interests.
-        4. Suggested message (Anonymous, no ID).
-        
-        Return JSON ONLY: {{"match": true/false, "estimated_age": "range or unknown", "gender": "male/female", "reasoning": "...", "suggested_message": "..."}}
-        """
-        try:
-            chat_completion = self.client.chat.completions.create(
-                messages=[{"role": "user", "content": prompt}],
-                model=GROQ_MODEL,
-                response_format={"type": "json_object"}
-            )
-            return json.loads(chat_completion.choices[0].message.content)
-        except Exception as e:
-            return {"match": False, "reasoning": str(e)}
-
-    def generate_final_message(self, suggestion): return suggestion
-    def generate_reply(self, incoming_text, history=""):
-        prompt = f"User said: {incoming_text}\nReply naturally. If they ask who this is or seem interested, offer ID: {MY_INSTA_ID}"
-        try:
-            chat_completion = self.client.chat.completions.create(
-                messages=[{"role": "user", "content": prompt}],
-                model=GROQ_MODEL,
-            )
-            return chat_completion.choices[0].message.content.strip()
-        except: return "Hey! Follow me on my main ID: " + MY_INSTA_ID
 
 class InstagramBrowserBot:
     def __init__(self):
         chrome_options = Options()
-        if HEADLESS: chrome_options.add_argument("--headless")
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument("--disable-notifications")
+        if HEADLESS and not USE_EXISTING_BROWSER: 
+            chrome_options.add_argument("--headless")
         
-        self.driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+        if USE_EXISTING_BROWSER:
+            print(f"Connecting to existing Chrome on port {REMOTE_DEBUGGING_PORT}...")
+            chrome_options.add_experimental_option("debuggerAddress", f"127.0.0.1:{REMOTE_DEBUGGING_PORT}")
+        else:
+            chrome_options.add_argument("--no-sandbox")
+            chrome_options.add_argument("--disable-dev-shm-usage")
+            chrome_options.add_argument("--disable-notifications")
+        
+        try:
+            self.driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+        except Exception as e:
+            if USE_EXISTING_BROWSER:
+                print(f"\nCRITICAL ERROR: Could not connect to Chrome on port {REMOTE_DEBUGGING_PORT}.")
+                print("Make sure Chrome is running with the --remote-debugging-port flag.")
+                print("Check the 'start_chrome.bat' file for instructions.")
+            raise e
         self.wait = WebDriverWait(self.driver, 15)
         self.ai = AIHandlerEngine()
         self.history = HistoryManager()
@@ -91,7 +56,7 @@ class InstagramBrowserBot:
     def is_logged_in(self):
         try:
             self.driver.get("https://www.instagram.com/")
-            time.sleep(3)
+            time.sleep(random.uniform(ACTION_DELAY_RANGE[0], ACTION_DELAY_RANGE[1]))
             if "login" not in self.driver.current_url:
                 self.wait.until(EC.presence_of_element_located((By.XPATH, "//a[contains(@href, '/direct/')] | //svg[@aria-label='Home']")))
                 return True
@@ -104,15 +69,24 @@ class InstagramBrowserBot:
             print("Already logged in. Skipping login steps.")
             return
 
+        if USE_EXISTING_BROWSER:
+            print("\n--- ACTION REQUIRED ---")
+            print("1. You are using an EXISTING browser.")
+            print("2. Please log into Instagram manually in that browser window.")
+            print("3. Navigate to the Instagram Home Page.")
+            print(">>> Press Enter here ONLY when you are logged in and on the Home Page...")
+            input()
+            return
+
         print("Opening Login Page...")
         self.driver.get("https://www.instagram.com/accounts/login/")
-        time.sleep(5)
+        time.sleep(random.uniform(ACTION_DELAY_RANGE[0], ACTION_DELAY_RANGE[1]))
         try:
             try:
                 continue_btn = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Continue')]")))
                 continue_btn.click()
                 print("Clicked 'Continue as' button.")
-                time.sleep(5)
+                time.sleep(random.uniform(ACTION_DELAY_RANGE[0], ACTION_DELAY_RANGE[1]))
                 if self.is_logged_in(): return
             except: pass
 
@@ -121,12 +95,12 @@ class InstagramBrowserBot:
             pass_input = self.driver.find_element(By.CSS_SELECTOR, "input[name='password']")
             user_input.send_keys(IG_USERNAME)
             pass_input.send_keys(IG_PASSWORD); pass_input.send_keys(Keys.ENTER)
-            time.sleep(5)
+            time.sleep(random.uniform(ACTION_DELAY_RANGE[0], ACTION_DELAY_RANGE[1]))
             try:
                 save_info_btn = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Save Info')] | //div[contains(text(), 'Save Info')]")))
                 save_info_btn.click()
                 print("Clicked 'Save Info'.")
-                time.sleep(3)
+                time.sleep(random.uniform(ACTION_DELAY_RANGE[0], ACTION_DELAY_RANGE[1]))
             except: pass
         except Exception as e:
             print(f"Auto-login skipped or fields not found.")
@@ -136,6 +110,16 @@ class InstagramBrowserBot:
         print("2. DO NOT PRESS ENTER until you see your actual Instagram FEED (posts from friends).")
         print(">>> Press Enter here ONLY when you are on the Home Page...")
         input()
+
+    def clear_cache(self):
+        """Clears Chrome cookies and cache."""
+        print("Clearing browser cache and cookies...")
+        try:
+            self.driver.execute_cdp_cmd('Network.clearBrowserCache', {})
+            self.driver.execute_cdp_cmd('Network.clearBrowserCookies', {})
+            print("Successfully cleared browser data.")
+        except Exception as e:
+            print(f"Failed to clear cache: {e}")
 
     def is_verified(self):
         """Checks if the current profile has a verified blue tick."""
@@ -232,7 +216,7 @@ class InstagramBrowserBot:
             
             # Scroll down
             self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(3)
+            time.sleep(random.uniform(ACTION_DELAY_RANGE[0], ACTION_DELAY_RANGE[1]))
             scroll_attempts += 1
             print(f"  Scrolling grid... (Collected: {len(links)})")
 
@@ -243,11 +227,16 @@ class InstagramBrowserBot:
         PHASE 1: Grid Collection + Direct Profile Visits.
         """
         self.login()
+        total_match_count = 0
         
         for hashtag in hashtags:
+            if total_match_count >= MAX_SESSION_MATCHES:
+                print(f"\n--- REACHED GLOBAL SESSION LIMIT ({MAX_SESSION_MATCHES} matches) ---")
+                break
+                
             print(f"\n--- EXPLORING HASHTAG: #{hashtag} ---")
             self.driver.get(f"https://www.instagram.com/explore/tags/{hashtag}/")
-            time.sleep(5)
+            time.sleep(random.uniform(ACTION_DELAY_RANGE[0], ACTION_DELAY_RANGE[1]))
             
             post_links = self.collect_grid_posts(hashtag, MAX_POSTS_PER_HASHTAG)
             print(f"Found {len(post_links)} links to analyze.")
@@ -259,7 +248,7 @@ class InstagramBrowserBot:
                 try:
                     print(f"\nAnalyzing Post: {link}")
                     self.driver.get(link)
-                    time.sleep(random.uniform(3, 5))
+                    time.sleep(random.uniform(ACTION_DELAY_RANGE[0], ACTION_DELAY_RANGE[1]))
                     
                     # Extract handle from post page
                     try:
@@ -288,15 +277,18 @@ class InstagramBrowserBot:
                         print(f"  Extraction error for {link}: {e}")
                         continue
                         
-                    if not name or name in [IG_USERNAME, "explore", "about"] or self.history.is_messaged(name):
-                        print(f"  Skipping @{name} (Already handled or invalid).")
+                    if not name or name in [IG_USERNAME, "explore", "about"]:
+                        continue
+                        
+                    if self.history.is_messaged(name) or self.db.user_exists(name):
+                        print(f"  Skipping @{name} (Already in Database or History).")
                         continue
 
                     print(f"Processing Profile: @{name}")
                     
                     # Visit Profile Directly
                     self.driver.get(f"https://www.instagram.com/{name}/")
-                    time.sleep(random.uniform(4, 6))
+                    time.sleep(random.uniform(ACTION_DELAY_RANGE[0], ACTION_DELAY_RANGE[1]))
                     
                     # Check for Verified Badge (Skip if verified)
                     if self.is_verified():
@@ -331,7 +323,7 @@ class InstagramBrowserBot:
                         if is_match:
                             print(f"  MATCH! Following and saving...")
                             self.follow_user_internal() 
-                            time.sleep(2)
+                            time.sleep(random.uniform(ACTION_DELAY_RANGE[0], ACTION_DELAY_RANGE[1]))
                             
                             screenshot_path = f"scraped_profiles/{name}.png"
                             self.driver.save_screenshot(screenshot_path)
@@ -341,6 +333,11 @@ class InstagramBrowserBot:
                                 suggested_message=suggested_message, screenshot_path=screenshot_path
                             )
                             match_count += 1
+                            total_match_count += 1
+                            
+                            if total_match_count >= MAX_SESSION_MATCHES:
+                                print(f"  Reached global session limit of {MAX_SESSION_MATCHES} matches. Stopping.")
+                                return # Exit phase 1
                         else:
                             print(f"  Skip: {reasoning}")
                     
@@ -390,6 +387,11 @@ class InstagramBrowserBot:
             print(f"\nProcessing @{username} from DB Review...")
             print(f"Reasoning: {p[4]}")
             
+            if self.history.is_messaged(username):
+                print(f"  Skipping @{username}: Already in sent history. Marking as sent in DB.")
+                self.db.mark_as_sent(username)
+                continue
+            
             if DRY_RUN:
                 print(f"[DRY RUN] Would send to @{username}: {message}")
                 self.db.mark_as_sent(username) # Mark as handled even in dry run
@@ -399,9 +401,20 @@ class InstagramBrowserBot:
             if sent:
                 self.db.update_conversation_state(username, "sent")
                 self.db.mark_as_sent(username)
-                time.sleep(random.randint(60, 120)) # Safety delay
+                
+                delay = random.uniform(MESSAGE_DELAY_RANGE[0], MESSAGE_DELAY_RANGE[1])
+                print(f"Waiting {delay:.1f}s before next message...")
+                time.sleep(delay)
             else:
                 print(f"Failed to send to @{username}. Keeping as pending.")
+        
+        print("\n" + "="*50)
+        print("PHASE 2 COMPLETE: All pending messages from the DB have been processed.")
+        print("SUGGESTED NEXT STEPS:")
+        print("  1. Switch to Phase 1 to find more matching profiles.")
+        print("  2. Switch to Phase 3 to check for replies.")
+        print("  3. Close the app if you are done for now.")
+        print("="*50 + "\n")
 
     def run_phase_3_replies(self):
         """
@@ -410,7 +423,7 @@ class InstagramBrowserBot:
         self.login()
         print("Checking Direct Messages for replies...")
         self.driver.get("https://www.instagram.com/direct/inbox/")
-        time.sleep(5)
+        time.sleep(random.uniform(ACTION_DELAY_RANGE[0], ACTION_DELAY_RANGE[1]))
         
         # This is a complex part: Scraping unread messages or checking specific threads.
         # Simplified version: Look for usernames in the inbox that we have messaged.
@@ -429,10 +442,10 @@ class InstagramBrowserBot:
                 self.driver.get(f"https://www.instagram.com/direct/t/{username}/") # This is a guess, usually IG uses thread IDs but direct URLs sometimes work if handled by IG redirects
                 # More robust: Navigate to profile then click Message
                 self.driver.get(f"https://www.instagram.com/{username}/")
-                time.sleep(2)
+                time.sleep(random.uniform(ACTION_DELAY_RANGE[0], ACTION_DELAY_RANGE[1]))
                 msg_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//div[text()='Message']")))
                 msg_button.click()
-                time.sleep(4)
+                time.sleep(random.uniform(ACTION_DELAY_RANGE[0], ACTION_DELAY_RANGE[1]))
                 
                 # Check the last message in the thread
                 messages = self.driver.find_elements(By.XPATH, "//div[@role='row']")
@@ -466,7 +479,9 @@ class InstagramBrowserBot:
                 else:
                     self.db.update_conversation_state(username, "replied")
                 
-                time.sleep(random.randint(5, 10))
+                delay = random.uniform(MESSAGE_DELAY_RANGE[0], MESSAGE_DELAY_RANGE[1])
+                print(f"Waiting {delay:.1f}s after reply...")
+                time.sleep(delay)
                 
             except Exception as e:
                 print(f"Error checking replies for @{username}: {e}")
@@ -476,7 +491,8 @@ class InstagramBrowserBot:
         print("1. Phase 1: Scrape & Follow new profiles")
         print("2. Phase 2: Send Initial anonymous messages")
         print("3. Phase 3: Manage Replies & Offer Insta ID")
-        choice = input("Select Phase (1/2/3): ")
+        print("4. Clear Browser Cache")
+        choice = input("Select Option (1/2/3/4): ")
         
         if choice == '1':
             self.run_phase_1_scrape(hashtags)
@@ -484,6 +500,9 @@ class InstagramBrowserBot:
             self.run_phase_2_send()
         elif choice == '3':
             self.run_phase_3_replies()
+        elif choice == '4':
+            self.clear_cache()
+            print("Cache cleared. You can now run other phases with a fresh state.")
         else:
             print("Invalid choice.")
 
@@ -515,7 +534,7 @@ class InstagramBrowserBot:
             if follow_btn:
                 follow_btn.click()
                 print(f"Successfully followed @{username}!")
-                time.sleep(2)
+                time.sleep(random.uniform(ACTION_DELAY_RANGE[0], ACTION_DELAY_RANGE[1]))
             else:
                 print(f"Could not find Follow button for @{username}. Maybe already following?")
         except Exception as e:
@@ -525,17 +544,17 @@ class InstagramBrowserBot:
         print(f"Attempting to send message to @{username}...")
         try:
             self.driver.get(f"https://www.instagram.com/{username}/")
-            time.sleep(3)
+            time.sleep(random.uniform(ACTION_DELAY_RANGE[0], ACTION_DELAY_RANGE[1]))
             
             msg_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//div[text()='Message']")))
             msg_button.click()
-            time.sleep(3)
+            time.sleep(random.uniform(ACTION_DELAY_RANGE[0], ACTION_DELAY_RANGE[1]))
             
             text_area = self.wait.until(EC.presence_of_element_located((By.XPATH, "//div[@role='textbox']")))
             text_area.send_keys(message)
             text_area.send_keys(Keys.ENTER)
             self.history.add_to_history(username, message)
-            print(f"Message sent and saved to history for @{username}!")
+            print(f"Message sent to @{username}!")
             return True
         except Exception as e:
             print(f"Failed to send message via browser: {e}")

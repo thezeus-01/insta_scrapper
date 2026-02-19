@@ -22,6 +22,14 @@ class DatabaseManager:
                 conversation_state TEXT DEFAULT 'scraped' -- scraped, sent, replied, offered_id, finished
             )
         ''')
+        
+        # Migration: Add conversation_state column if it doesn't exist
+        try:
+            cursor.execute("SELECT conversation_state FROM potential_matches LIMIT 1")
+        except sqlite3.OperationalError:
+            print("Migrating database: Adding 'conversation_state' column...")
+            cursor.execute("ALTER TABLE potential_matches ADD COLUMN conversation_state TEXT DEFAULT 'scraped'")
+            
         conn.commit()
         conn.close()
 
@@ -70,3 +78,11 @@ class DatabaseManager:
         rows = cursor.fetchall()
         conn.close()
         return rows
+
+    def user_exists(self, username):
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM potential_matches WHERE username = ?", (username,))
+        row = cursor.fetchone()
+        conn.close()
+        return row is not None
