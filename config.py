@@ -20,7 +20,7 @@ GROQ_MODEL = "llama-3.3-70b-versatile"
 DEFAULT_MESSAGE = "Hey! Loved your profile. Would love to connect! :)"
 
 # Personal Branding
-MY_INSTA_ID = "ig._ashz" # The ID of the guy behind the bot
+MY_INSTA_ID = "MENTION YOUR ID " # The ID of the guy behind the bot
 
 # Targeting Criteria
 TARGET_AGE_RANGE = (19, 23)
